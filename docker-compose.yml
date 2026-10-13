@@ -1,0 +1,74 @@
+# Comercial La Estrella — Proyecto Fase 2
+# Levanta: SQL Server 2022 → ejecuta init.sql automáticamente → API REST (Node.js)
+# Uso:  cp .env.example .env   &&   docker compose up -d --build
+
+services:
+  # 1) Motor de base de datos
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: estrella-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      MSSQL_SA_PASSWORD: ${SA_PASSWORD}
+    ports:
+      - "${DB_PORT:-1433}:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$${MSSQL_SA_PASSWORD}\" -Q \"SELECT 1\" -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  # 2) Inicialización automática: ejecuta init.sql UNA sola vez
+  #    (si la base ya existe, no hace nada y los datos se conservan)
+  db-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: estrella-db-init
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      SA_PASSWORD: ${SA_PASSWORD}
+      API_DB_USER: ${API_DB_USER}
+      API_DB_PASSWORD: ${API_DB_PASSWORD}
+    volumes:
+      - ./init.sql:/scripts/init.sql:ro
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        sqlrun() { /opt/mssql-tools18/bin/sqlcmd -C -I -b -S sqlserver -U sa -P "$$SA_PASSWORD" "$$@"; }
+        EXISTE=$$(sqlrun -h -1 -W -Q "SET NOCOUNT ON; SELECT CASE WHEN DB_ID('ComercialLaEstrella') IS NULL THEN 0 ELSE 1 END" | tr -d '[:space:]')
+        if [ "$$EXISTE" = "1" ]; then
+          echo ">> La base ComercialLaEstrella ya existe: se omite init.sql"
+        else
+          echo ">> Ejecutando init.sql ..."
+          sqlrun -v API_USER="$$API_DB_USER" API_PASSWORD="$$API_DB_PASSWORD" -i /scripts/init.sql || exit 1
+          echo ">> init.sql ejecutado correctamente"
+        fi
+    restart: "no"
+
+  # 3) API REST (Node.js + Express). Se conecta con un usuario de mínimo privilegio.
+  api:
+    build: ./api
+    container_name: estrella-api
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    environment:
+      PORT: 3000
+      DB_HOST: sqlserver
+      DB_PORT: 1433
+      DB_NAME: ComercialLaEstrella
+      DB_USER: ${API_DB_USER}
+      DB_PASSWORD: ${API_DB_PASSWORD}
+    ports:
+      - "${API_PORT:-3000}:3000"
+    restart: unless-stopped
+
+volumes:
+  sqlserver_data:
