@@ -237,11 +237,262 @@ CREATE INDEX IX_PAGO_VENTA   ON PAGO (ID_VEN);
 CREATE INDEX IX_VENTA_TIENDA ON VENTA (ID_TI);
 GO
 
-/* =====================================================================
-   2. TRIGGERS
-   pendientes
-   ===================================================================== */
+/* ---------------------------------------------------------------------
+   TRIGGER 1: Insert_Detalle — protege el inventario
+   Se dispara al insertar en DESGLOSE_VENTA.
+     1) La venta debe estar registrada.
+     2) El producto debe existir en el catálogo de la tienda de la venta
+        y la cantidad no puede superar la existencia → si no, RAISERROR
+        'Stock insuficiente' + ROLLBACK.
+     3) Si todo es válido, descuenta la cantidad de CATALOGO_PRODUCTO.
+   --------------------------------------------------------------------- */
+CREATE TRIGGER Insert_Detalle
+ON DESGLOSE_VENTA
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
 
+    -- 1) Solo se agregan productos a ventas registradas
+    IF EXISTS (SELECT 1
+               FROM inserted i
+               INNER JOIN VENTA v        ON v.ID_VEN    = i.ID_VEN
+               INNER JOIN ESTADO_VENTA e ON e.ID_ES_VEN = v.ID_ES_VEN
+               WHERE e.NOMBRE_ES_VEN <> 'REGISTRADA')
+    BEGIN
+        RAISERROR('Solo se pueden agregar productos a ventas en estado REGISTRADA', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+
+    -- 2) Validar stock en la tienda de cada venta.
+    --    Se agrupa por (tienda, producto) por si el INSERT trae varias filas.
+    --    LEFT JOIN: si el producto no está en el catálogo de esa tienda,
+    --    c.ID_PRO queda NULL y también se rechaza.
+    IF EXISTS (SELECT 1
+               FROM (SELECT v.ID_TI, i.ID_PRO, SUM(i.CANTIDAD_DES_VEN) AS CANTIDAD
+                     FROM inserted i
+                     INNER JOIN VENTA v ON v.ID_VEN = i.ID_VEN
+                     GROUP BY v.ID_TI, i.ID_PRO) s
+               LEFT JOIN CATALOGO_PRODUCTO c ON c.ID_TI  = s.ID_TI
+                                            AND c.ID_PRO = s.ID_PRO
+               WHERE c.ID_PRO IS NULL
+                  OR s.CANTIDAD > c.EXISTENCIA_ACTUAL_CAT_PRO)
+    BEGIN
+        RAISERROR('Stock insuficiente', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+
+    -- 3) Descontar el inventario de la tienda
+    UPDATE c
+    SET c.EXISTENCIA_ACTUAL_CAT_PRO = c.EXISTENCIA_ACTUAL_CAT_PRO - s.CANTIDAD
+    FROM CATALOGO_PRODUCTO c
+    INNER JOIN (SELECT v.ID_TI, i.ID_PRO, SUM(i.CANTIDAD_DES_VEN) AS CANTIDAD
+                FROM inserted i
+                INNER JOIN VENTA v ON v.ID_VEN = i.ID_VEN
+                GROUP BY v.ID_TI, i.ID_PRO) s
+            ON s.ID_TI = c.ID_TI AND s.ID_PRO = c.ID_PRO;
+END;
+GO
+
+/* ---------------------------------------------------------------------
+   TRIGGER 2: Insert_Pago — Estado automático de la venta
+   Se dispara al insertar en PAGO.
+     1) No se aceptan pagos a ventas ANULADA ni a ventas ya PAGADA.
+     2) Suma TODOS los pagos de la venta y los compara con el total
+        (suma de SUBTOTAL_DES_VEN). Si pagado >= total procede a  estado PAGADA.
+   --------------------------------------------------------------------- */
+CREATE TRIGGER Insert_Pago
+ON PAGO
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Los ids se buscan por nombre para no depender de números fijos
+    DECLARE @PAGADA  INT = (SELECT ID_ES_VEN FROM ESTADO_VENTA WHERE NOMBRE_ES_VEN = 'PAGADA');
+    DECLARE @ANULADA INT = (SELECT ID_ES_VEN FROM ESTADO_VENTA WHERE NOMBRE_ES_VEN = 'ANULADA');
+
+    -- 1) Validaciones
+    IF EXISTS (SELECT 1 FROM inserted i
+               INNER JOIN VENTA v ON v.ID_VEN = i.ID_VEN
+               WHERE v.ID_ES_VEN = @ANULADA)
+    BEGIN
+        RAISERROR('No se pueden registrar pagos a una venta ANULADA', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+
+    IF EXISTS (SELECT 1 FROM inserted i
+               INNER JOIN VENTA v ON v.ID_VEN = i.ID_VEN
+               WHERE v.ID_ES_VEN = @PAGADA)
+    BEGIN
+        RAISERROR('La venta ya se encuentra PAGADA', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+
+    -- 2) Si la suma de pagos alcanza o supera el total procede a PAGADA.
+    --    Pagos y desglose se suman en subconsultas separadas para que
+    --    un JOIN no multiplique las filas y altere las sumas.
+    UPDATE v
+    SET v.ID_ES_VEN = @PAGADA
+    FROM VENTA v
+    INNER JOIN (SELECT ID_VEN, SUM(MONTO_PAG) AS TOTAL_PAGADO
+                FROM PAGO
+                WHERE ID_VEN IN (SELECT ID_VEN FROM inserted)
+                GROUP BY ID_VEN) p ON p.ID_VEN = v.ID_VEN
+    INNER JOIN (SELECT ID_VEN, SUM(SUBTOTAL_DES_VEN) AS TOTAL_VENTA
+                FROM DESGLOSE_VENTA
+                WHERE ID_VEN IN (SELECT ID_VEN FROM inserted)
+                GROUP BY ID_VEN) d ON d.ID_VEN = v.ID_VEN
+    WHERE p.TOTAL_PAGADO >= d.TOTAL_VENTA;
+END;
+GO
+
+/* ---------------------------------------------------------------------
+   TRIGGERS COMPLEMENTARIOS (mantenemos la consistencia del inventario y el estado de la venta)
+   --------------------------------------------------------------------- */
+
+-- Al ELIMINAR un desglose: devuelve el inventario a la tienda.
+CREATE TRIGGER Delete_Detalle
+ON DESGLOSE_VENTA
+AFTER DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM deleted d
+               INNER JOIN VENTA v        ON v.ID_VEN    = d.ID_VEN
+               INNER JOIN ESTADO_VENTA e ON e.ID_ES_VEN = v.ID_ES_VEN
+               WHERE e.NOMBRE_ES_VEN <> 'REGISTRADA')
+    BEGIN
+        RAISERROR('Solo se puede eliminar el detalle de ventas en estado REGISTRADA', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+
+    UPDATE c
+    SET c.EXISTENCIA_ACTUAL_CAT_PRO = c.EXISTENCIA_ACTUAL_CAT_PRO + s.CANTIDAD
+    FROM CATALOGO_PRODUCTO c
+    INNER JOIN (SELECT v.ID_TI, d.ID_PRO, SUM(d.CANTIDAD_DES_VEN) AS CANTIDAD
+                FROM deleted d
+                INNER JOIN VENTA v ON v.ID_VEN = d.ID_VEN
+                GROUP BY v.ID_TI, d.ID_PRO) s
+            ON s.ID_TI = c.ID_TI AND s.ID_PRO = c.ID_PRO;
+END;
+GO
+
+-- Al MODIFICAR un desglose: devuelve lo anterior (DELETED), descuenta
+-- lo nuevo (INSERTED) y valida que el inventario no quede negativo.
+CREATE TRIGGER Update_Detalle
+ON DESGLOSE_VENTA
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (SELECT 1 FROM VENTA v
+               INNER JOIN ESTADO_VENTA e ON e.ID_ES_VEN = v.ID_ES_VEN
+               WHERE v.ID_VEN IN (SELECT ID_VEN FROM inserted UNION SELECT ID_VEN FROM deleted)
+                 AND e.NOMBRE_ES_VEN <> 'REGISTRADA')
+    BEGIN
+        RAISERROR('Solo se puede modificar el detalle de ventas en estado REGISTRADA', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+
+    -- Movimiento neto por (tienda, producto): + lo devuelto, - lo nuevo
+    DECLARE @neto TABLE (ID_TI INT, ID_PRO INT, DELTA INT, PRIMARY KEY (ID_TI, ID_PRO));
+
+    INSERT INTO @neto (ID_TI, ID_PRO, DELTA)
+    SELECT x.ID_TI, x.ID_PRO, SUM(x.DELTA)
+    FROM (SELECT v.ID_TI, d.ID_PRO,  d.CANTIDAD_DES_VEN AS DELTA
+          FROM deleted d  INNER JOIN VENTA v ON v.ID_VEN = d.ID_VEN
+          UNION ALL
+          SELECT v.ID_TI, i.ID_PRO, -i.CANTIDAD_DES_VEN AS DELTA
+          FROM inserted i INNER JOIN VENTA v ON v.ID_VEN = i.ID_VEN) x
+    GROUP BY x.ID_TI, x.ID_PRO;
+
+    IF EXISTS (SELECT 1 FROM @neto n
+               LEFT JOIN CATALOGO_PRODUCTO c ON c.ID_TI = n.ID_TI AND c.ID_PRO = n.ID_PRO
+               WHERE n.DELTA < 0
+                 AND (c.ID_PRO IS NULL OR c.EXISTENCIA_ACTUAL_CAT_PRO + n.DELTA < 0))
+    BEGIN
+        RAISERROR('Stock insuficiente', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+
+    UPDATE c
+    SET c.EXISTENCIA_ACTUAL_CAT_PRO = c.EXISTENCIA_ACTUAL_CAT_PRO + n.DELTA
+    FROM CATALOGO_PRODUCTO c
+    INNER JOIN @neto n ON n.ID_TI = c.ID_TI AND n.ID_PRO = c.ID_PRO;
+END;
+GO
+
+-- Al MODIFICAR o ELIMINAR pagos: recalcula PAGADA / REGISTRADA.
+CREATE TRIGGER Recalcular_Estado_Pago
+ON PAGO
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @REGISTRADA INT = (SELECT ID_ES_VEN FROM ESTADO_VENTA WHERE NOMBRE_ES_VEN = 'REGISTRADA');
+    DECLARE @PAGADA     INT = (SELECT ID_ES_VEN FROM ESTADO_VENTA WHERE NOMBRE_ES_VEN = 'PAGADA');
+    DECLARE @ANULADA    INT = (SELECT ID_ES_VEN FROM ESTADO_VENTA WHERE NOMBRE_ES_VEN = 'ANULADA');
+
+    UPDATE v
+    SET v.ID_ES_VEN = CASE
+                          WHEN ISNULL(d.TOTAL_VENTA, 0) > 0
+                           AND ISNULL(p.TOTAL_PAGADO, 0) >= d.TOTAL_VENTA THEN @PAGADA
+                          ELSE @REGISTRADA
+                      END
+    FROM VENTA v
+    LEFT JOIN (SELECT ID_VEN, SUM(MONTO_PAG) AS TOTAL_PAGADO
+               FROM PAGO GROUP BY ID_VEN) p ON p.ID_VEN = v.ID_VEN
+    LEFT JOIN (SELECT ID_VEN, SUM(SUBTOTAL_DES_VEN) AS TOTAL_VENTA
+               FROM DESGLOSE_VENTA GROUP BY ID_VEN) d ON d.ID_VEN = v.ID_VEN
+    WHERE v.ID_ES_VEN <> @ANULADA
+      AND v.ID_VEN IN (SELECT ID_VEN FROM inserted UNION SELECT ID_VEN FROM deleted);
+END;
+GO
+
+-- Al ANULAR una venta: devuelve el inventario a la tienda.
+-- Una venta ANULADA no puede volver a otro estado.
+CREATE TRIGGER Anular_Venta
+ON VENTA
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT UPDATE(ID_ES_VEN) RETURN;
+
+    DECLARE @ANULADA INT = (SELECT ID_ES_VEN FROM ESTADO_VENTA WHERE NOMBRE_ES_VEN = 'ANULADA');
+
+    IF EXISTS (SELECT 1 FROM inserted i
+               INNER JOIN deleted d ON d.ID_VEN = i.ID_VEN
+               WHERE d.ID_ES_VEN = @ANULADA AND i.ID_ES_VEN <> @ANULADA)
+    BEGIN
+        RAISERROR('Una venta ANULADA no puede reactivarse', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END;
+
+    UPDATE c
+    SET c.EXISTENCIA_ACTUAL_CAT_PRO = c.EXISTENCIA_ACTUAL_CAT_PRO + s.CANTIDAD
+    FROM CATALOGO_PRODUCTO c
+    INNER JOIN (SELECT i.ID_TI, dv.ID_PRO, SUM(dv.CANTIDAD_DES_VEN) AS CANTIDAD
+                FROM inserted i
+                INNER JOIN deleted d         ON d.ID_VEN  = i.ID_VEN
+                INNER JOIN DESGLOSE_VENTA dv ON dv.ID_VEN = i.ID_VEN
+                WHERE i.ID_ES_VEN = @ANULADA AND d.ID_ES_VEN <> @ANULADA
+                GROUP BY i.ID_TI, dv.ID_PRO) s
+            ON s.ID_TI = c.ID_TI AND s.ID_PRO = c.ID_PRO;
+END;
+GO
 
 /* =====================================================================
    3. VISTAS
