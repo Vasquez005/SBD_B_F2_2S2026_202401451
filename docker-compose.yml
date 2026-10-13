@@ -1,5 +1,5 @@
 # Comercial La Estrella — Proyecto Fase 2
-# Levanta: SQL Server 2022 → ejecuta init.sql automáticamente → API REST (Node.js)
+# Levanta: SQL Server 2022 → ejecuta init.sql automáticamente pasa por alto la API REST (Node.js)
 # Uso:  cp .env.example .env   &&   docker compose up -d --build
 
 services:
@@ -52,7 +52,7 @@ services:
         fi
     restart: "no"
 
-  # 3) API REST (Node.js + Express). Se conecta con un usuario de mínimo privilegio.
+  # 3) API REST (Node.js + Express). Usa el usuario de mínimo privilegio.
   api:
     build: ./api
     container_name: estrella-api
@@ -61,7 +61,7 @@ services:
         condition: service_completed_successfully
     environment:
       PORT: 3000
-      DB_HOST: sqlserver
+      DB_HOST: sqlserver          # nombre del servicio, no "localhost"
       DB_PORT: 1433
       DB_NAME: ComercialLaEstrella
       DB_USER: ${API_DB_USER}
