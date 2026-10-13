@@ -242,7 +242,7 @@ GO
    Se dispara al insertar en DESGLOSE_VENTA.
      1) La venta debe estar registrada.
      2) El producto debe existir en el catálogo de la tienda de la venta
-        y la cantidad no puede superar la existencia → si no, RAISERROR
+        y la cantidad no puede superar la existencia -> si no, RAISERROR
         'Stock insuficiente' + ROLLBACK.
      3) Si todo es válido, descuenta la cantidad de CATALOGO_PRODUCTO.
    --------------------------------------------------------------------- */
@@ -494,10 +494,97 @@ BEGIN
 END;
 GO
 
-/* =====================================================================
-   3. VISTAS
-    pendientes
-   ===================================================================== */
+/* ---------------------------------------------------------------------
+   VISTA 1: Vista_Ventas_Ubicacion
+   Tienda, municipio, departamento, país, cantidad de ventas y total
+   facturado.
+   - Tienda -> Municipio -> Departamento -> País con INNER JOIN.
+   - "vv" son las ventas válidas (no anuladas) con su total ya calculado.
+     Se une con LEFT JOIN para que también salgan tiendas sin ventas (0).
+   --------------------------------------------------------------------- */
+CREATE VIEW Vista_Ventas_Ubicacion
+AS
+SELECT
+    t.ID_TI                                             AS ID_TIENDA,
+    t.NOMBRE_TI                                         AS TIENDA,
+    m.NOMBRE_MUN                                        AS MUNICIPIO,
+    d.NOMBRE_DEP                                        AS DEPARTAMENTO,
+    p.NOMBRE_PA                                         AS PAIS,
+    COUNT(vv.ID_VEN)                                    AS CANTIDAD_VENTAS,
+    CAST(ISNULL(SUM(vv.TOTAL_VENTA), 0) AS DECIMAL(14,2)) AS TOTAL_FACTURADO
+FROM TIENDA t
+INNER JOIN MUNICIPIO    m ON m.ID_MUN = t.ID_MUN
+INNER JOIN DEPARTAMENTO d ON d.ID_DEP = m.ID_DEP
+INNER JOIN PAIS         p ON p.ID_PA  = d.ID_PA
+LEFT JOIN (
+    -- Ventas no anuladas con su total (suma del desglose)
+    SELECT v.ID_VEN, v.ID_TI, ISNULL(dt.TOTAL, 0) AS TOTAL_VENTA
+    FROM VENTA v
+    INNER JOIN ESTADO_VENTA e ON e.ID_ES_VEN = v.ID_ES_VEN
+    LEFT JOIN (SELECT ID_VEN, SUM(SUBTOTAL_DES_VEN) AS TOTAL
+               FROM DESGLOSE_VENTA
+               GROUP BY ID_VEN) dt ON dt.ID_VEN = v.ID_VEN
+    WHERE e.NOMBRE_ES_VEN <> 'ANULADA'
+) vv ON vv.ID_TI = t.ID_TI
+GROUP BY t.ID_TI, t.NOMBRE_TI, m.NOMBRE_MUN, d.NOMBRE_DEP, p.NOMBRE_PA;
+GO
+
+/* ---------------------------------------------------------------------
+   VISTA 2: Vista_Top_Productos
+   Código, nombre, categoría, marca, unidades vendidas y monto generado
+   (excluye ventas ANULADA). Solo productos que se han vendido.
+   El modelo no tiene un código aparte, así que ID_PRO es el código.
+   --------------------------------------------------------------------- */
+CREATE VIEW Vista_Top_Productos
+AS
+SELECT
+    pr.ID_PRO                                           AS CODIGO_PRODUCTO,
+    pr.NOMBRE_PRO                                       AS PRODUCTO,
+    c.NOMBRE_CAT                                        AS CATEGORIA,
+    ma.NOMBRE_MAR                                       AS MARCA,
+    SUM(dv.CANTIDAD_DES_VEN)                            AS UNIDADES_VENDIDAS,
+    CAST(SUM(dv.SUBTOTAL_DES_VEN) AS DECIMAL(14,2))     AS MONTO_TOTAL
+FROM DESGLOSE_VENTA dv
+INNER JOIN VENTA        v  ON v.ID_VEN    = dv.ID_VEN
+INNER JOIN ESTADO_VENTA e  ON e.ID_ES_VEN = v.ID_ES_VEN
+INNER JOIN PRODUCTO     pr ON pr.ID_PRO   = dv.ID_PRO
+INNER JOIN CATEGORIA    c  ON c.ID_CAT    = pr.ID_CAT
+INNER JOIN MARCA        ma ON ma.ID_MAR   = pr.ID_MAR
+WHERE e.NOMBRE_ES_VEN <> 'ANULADA'
+GROUP BY pr.ID_PRO, pr.NOMBRE_PRO, c.NOMBRE_CAT, ma.NOMBRE_MAR;
+GO
+
+/* ---------------------------------------------------------------------
+   VISTA 3: Vista_Saldos_Pendientes
+   Solo ventas REGISTRADA: total de la venta, monto pagado (si hay
+   abonos) y saldo pendiente.
+   Desglose y pagos se suman en subconsultas separadas (evita que el
+   JOIN duplique filas) y se unen con LEFT JOIN (puede no haber abonos).
+   --------------------------------------------------------------------- */
+CREATE VIEW Vista_Saldos_Pendientes
+AS
+SELECT
+    v.ID_VEN,
+    v.FECHA_VEN,
+    t.NOMBRE_TI                                                     AS TIENDA,
+    v.ID_CLI,
+    CONCAT(pe.NOMBRE_PER, N' ', pe.APELLIDO_PER)                    AS CLIENTE,
+    CAST(ISNULL(dt.TOTAL, 0) AS DECIMAL(12,2))                      AS TOTAL_VENTA,
+    CAST(ISNULL(pg.PAGADO, 0) AS DECIMAL(12,2))                     AS MONTO_PAGADO,
+    CAST(ISNULL(dt.TOTAL, 0) - ISNULL(pg.PAGADO, 0) AS DECIMAL(12,2)) AS SALDO_PENDIENTE
+FROM VENTA v
+INNER JOIN ESTADO_VENTA e  ON e.ID_ES_VEN = v.ID_ES_VEN
+INNER JOIN TIENDA       t  ON t.ID_TI     = v.ID_TI
+INNER JOIN CLIENTE      cl ON cl.ID_CLI   = v.ID_CLI
+INNER JOIN PERSONA      pe ON pe.ID_PER   = cl.ID_PER
+LEFT JOIN (SELECT ID_VEN, SUM(SUBTOTAL_DES_VEN) AS TOTAL
+           FROM DESGLOSE_VENTA
+           GROUP BY ID_VEN) dt ON dt.ID_VEN = v.ID_VEN
+LEFT JOIN (SELECT ID_VEN, SUM(MONTO_PAG) AS PAGADO
+           FROM PAGO
+           GROUP BY ID_VEN) pg ON pg.ID_VEN = v.ID_VEN
+WHERE e.NOMBRE_ES_VEN = 'REGISTRADA';
+GO
 
 
 /* =====================================================================
@@ -612,27 +699,27 @@ INSERT INTO CATALOGO_PRODUCTO (PRECIO_VIGENTE_CAT_PRO, EXISTENCIA_ACTUAL_CAT_PRO
     ( 935.00,  6, 4, 5), ( 675.00, 10, 4, 6), ( 395.00,  9, 4, 8);
 
 
--- Venta 1 (Zona 1): pago completo → quedará PAGADA (total 6797.00)
+-- Venta 1 (Zona 1): pago completo -> quedará PAGADA (total 6797.00)
 INSERT INTO VENTA (FECHA_VEN, ID_TI, ID_EMP, ID_CLI) VALUES ('2026-09-01T10:15:00', 1, 1, 1);
 INSERT INTO DESGLOSE_VENTA (CANTIDAD_DES_VEN, PRECIO_UNITARIO_DES_VEN, SUBTOTAL_DES_VEN, ID_VEN, ID_PRO) VALUES
     (1, 5499.00, 5499.00, 1, 1),
     (2,  649.00, 1298.00, 1, 6);
 INSERT INTO PAGO (MONTO_PAG, ID_MET_PAG, ID_VEN) VALUES (6797.00, 2, 1);
 
--- Venta 2 (Antigua): abono parcial → quedará REGISTRADA con saldo (total 5324.00)
+-- Venta 2 (Antigua): abono parcial -> quedará REGISTRADA con saldo (total 5324.00)
 INSERT INTO VENTA (FECHA_VEN, ID_TI, ID_EMP, ID_CLI) VALUES ('2026-09-05T15:40:00', 2, 3, 3);
 INSERT INTO DESGLOSE_VENTA (CANTIDAD_DES_VEN, PRECIO_UNITARIO_DES_VEN, SUBTOTAL_DES_VEN, ID_VEN, ID_PRO) VALUES
     (1, 4399.00, 4399.00, 2, 3),
     (1,  925.00,  925.00, 2, 5);
 INSERT INTO PAGO (MONTO_PAG, ID_MET_PAG, ID_VEN) VALUES (2000.00, 1, 2);
 
--- Venta 3 (Zona 1): sin pagos → REGISTRADA (total 5657.00)
+-- Venta 3 (Zona 1): sin pagos -> REGISTRADA (total 5657.00)
 INSERT INTO VENTA (FECHA_VEN, ID_TI, ID_EMP, ID_CLI) VALUES ('2026-09-12T11:00:00', 1, 2, 2);
 INSERT INTO DESGLOSE_VENTA (CANTIDAD_DES_VEN, PRECIO_UNITARIO_DES_VEN, SUBTOTAL_DES_VEN, ID_VEN, ID_PRO) VALUES
     (1, 4899.00, 4899.00, 3, 4),
     (2,  379.00,  758.00, 3, 8);
 
--- Venta 4 (Xela): dos abonos que completan el total → quedará PAGADA (total 3299.00)
+-- Venta 4 (Xela): dos abonos que completan el total -> quedará PAGADA (total 3299.00)
 INSERT INTO VENTA (FECHA_VEN, ID_TI, ID_EMP, ID_CLI) VALUES ('2026-09-20T09:30:00', 3, 4, 4);
 INSERT INTO DESGLOSE_VENTA (CANTIDAD_DES_VEN, PRECIO_UNITARIO_DES_VEN, SUBTOTAL_DES_VEN, ID_VEN, ID_PRO) VALUES
     (1, 3299.00, 3299.00, 4, 7);
@@ -645,7 +732,7 @@ INSERT INTO DESGLOSE_VENTA (CANTIDAD_DES_VEN, PRECIO_UNITARIO_DES_VEN, SUBTOTAL_
     (1, 4299.00, 4299.00, 5, 3);
 UPDATE VENTA SET ID_ES_VEN = 4 WHERE ID_VEN = 5;
 
--- Venta 6 (San Salvador): pago completo → quedará PAGADA (total 2420.00)
+-- Venta 6 (San Salvador): pago completo -> quedará PAGADA (total 2420.00)
 INSERT INTO VENTA (FECHA_VEN, ID_TI, ID_EMP, ID_CLI) VALUES ('2026-10-02T13:20:00', 4, 5, 5);
 INSERT INTO DESGLOSE_VENTA (CANTIDAD_DES_VEN, PRECIO_UNITARIO_DES_VEN, SUBTOTAL_DES_VEN, ID_VEN, ID_PRO) VALUES
     (3, 675.00, 2025.00, 6, 6),
