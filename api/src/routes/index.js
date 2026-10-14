@@ -18,6 +18,10 @@ const productos = require('../controllers/productos.controller');
 const personas = require('../controllers/personas.controller');
 const clientes = require('../controllers/clientes.controller');
 const empleados = require('../controllers/empleados.controller');
+const catalogoProductos = require('../controllers/catalogoProductos.controller');
+const ventas = require('../controllers/ventas.controller');
+const desgloseVenta = require('../controllers/desgloseVenta.controller');
+const pagos = require('../controllers/pagos.controller');
 
 const router = express.Router();
 
@@ -50,6 +54,9 @@ router.use('/productos', crudRouter(productos));
 router.use('/personas', crudRouter(personas));
 router.use('/clientes', crudRouter(clientes));     // PERSONA + CLIENTE en transacción
 router.use('/empleados', crudRouter(empleados));   // PERSONA + EMPLEADO en transacción
-
+router.use('/catalogo-productos', crudRouter(catalogoProductos));   // /:ID_TI/:ID_PRO
+router.use('/ventas', crudRouter(ventas, (r) => r.get('/:ID_VEN/completa', ventas.completa)));
+router.use('/desglose-venta', crudRouter(desgloseVenta));           // /:ID_VEN/:ID_PRO -> trigger Insert_Detalle
+router.use('/pagos', crudRouter(pagos));                            // trigger Insert_Pago
 
 module.exports = router;
