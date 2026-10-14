@@ -22,6 +22,7 @@ const catalogoProductos = require('../controllers/catalogoProductos.controller')
 const ventas = require('../controllers/ventas.controller');
 const desgloseVenta = require('../controllers/desgloseVenta.controller');
 const pagos = require('../controllers/pagos.controller');
+const reportes = require('../controllers/reportes.controller');
 
 const router = express.Router();
 
@@ -58,5 +59,23 @@ router.use('/catalogo-productos', crudRouter(catalogoProductos));   // /:ID_TI/:
 router.use('/ventas', crudRouter(ventas, (r) => r.get('/:ID_VEN/completa', ventas.completa)));
 router.use('/desglose-venta', crudRouter(desgloseVenta));           // /:ID_VEN/:ID_PRO -> trigger Insert_Detalle
 router.use('/pagos', crudRouter(pagos));                            // trigger Insert_Pago
+router.get('/reportes/ventas-ubicacion', reportes.ventasUbicacion);
+router.get('/reportes/top-productos', reportes.topProductos);
+router.get('/reportes/saldos-pendientes', reportes.saldosPendientes);
+
+// Índice de endpoints (útil para la revisión)
+router.get('/', (req, res) => {
+  res.json({
+    salud: '/api/health',
+    catalogos: ['/api/paises', '/api/departamentos', '/api/municipios', '/api/tipos-tienda',
+      '/api/tipos-identificacion', '/api/cargos', '/api/categorias', '/api/marcas',
+      '/api/estados-venta', '/api/metodos-pago'],
+    principales: ['/api/tiendas', '/api/productos', '/api/personas', '/api/clientes', '/api/empleados'],
+    transaccionales: ['/api/catalogo-productos/:ID_TI/:ID_PRO', '/api/ventas',
+      '/api/ventas/:ID_VEN/completa', '/api/desglose-venta/:ID_VEN/:ID_PRO', '/api/pagos'],
+    reportes: ['/api/reportes/ventas-ubicacion', '/api/reportes/top-productos',
+      '/api/reportes/saldos-pendientes'],
+  });
+});
 
 module.exports = router;
