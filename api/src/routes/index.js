@@ -13,6 +13,11 @@ const categorias = require('../controllers/categorias.controller');
 const marcas = require('../controllers/marcas.controller');
 const estadosVenta = require('../controllers/estadosVenta.controller');
 const metodosPago = require('../controllers/metodosPago.controller');
+const tiendas = require('../controllers/tiendas.controller');
+const productos = require('../controllers/productos.controller');
+const personas = require('../controllers/personas.controller');
+const clientes = require('../controllers/clientes.controller');
+const empleados = require('../controllers/empleados.controller');
 
 const router = express.Router();
 
@@ -40,6 +45,11 @@ router.use('/categorias', crudRouter(categorias));
 router.use('/marcas', crudRouter(marcas));
 router.use('/estados-venta', crudRouter(estadosVenta));
 router.use('/metodos-pago', crudRouter(metodosPago));
+router.use('/tiendas', crudRouter(tiendas));
+router.use('/productos', crudRouter(productos));
+router.use('/personas', crudRouter(personas));
+router.use('/clientes', crudRouter(clientes));     // PERSONA + CLIENTE en transacción
+router.use('/empleados', crudRouter(empleados));   // PERSONA + EMPLEADO en transacción
 
 
 module.exports = router;
