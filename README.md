@@ -1,9 +1,11 @@
 # Comercial La Estrella — Proyecto Fase 2 (BD1, 2S2026)
 
-Backend para la base de datos **Comercial La Estrella**: SQL Server 2022 en Docker, inicializado automáticamente con `init.sql`, y un API REST en Node.js/Express que es la única vía para manipular datos. Las reglas de negocio (inventario y estado de ventas) viven en **triggers** y los reportes en **vistas**.
+Backend para la base de datos **Comercial La Estrella**: SQL Server 2022 en Docker, inicializado automáticamente con `init.sql`, y un API REST en Node.js/Express que es la **única vía** para manipular datos. 
 
-- **Estudiante:** _[Nombre completo]_ — **Carné:** _[#carnet]_
-- **Repositorio:** _[https://github.com/usuario/repositorio]_
+- **Estudiante:** Armando José Vásquez Castillo
+- **Carné:** 202401451
+- **Repositorio:** https://github.com/Vasquez005/SBD_B_F2_2S2026_202401451.git
+
 
 ---
 
@@ -11,79 +13,95 @@ Backend para la base de datos **Comercial La Estrella**: SQL Server 2022 en Dock
 
 ```
 .
-├── docker-compose.yml        # SQL Server 2022 + inicialización + API
-├── init.sql                  # Tablas, llaves, vistas, triggers, usuario del API y datos
-├── .env.example              # Variables de entorno (copiar a .env)
+├── docker-compose.yml          # SQL Server 2022 + inicialización + API
+├── init.sql                    # Tablas, llaves, triggers, vistas, usuario del API y datos de prueba
+├── .env.example                # Variables de entorno (copiar a .env)
 ├── api/
 │   ├── Dockerfile
 │   ├── package.json
 │   └── src/
-│       ├── server.js         # Arranque y conexión con reintentos
-│       ├── app.js            # Express, middlewares
-│       ├── config/db.js      # Conexión mssql (variables de entorno)
-│       ├── routes/           # index.js (rutas) y crudRouter.js
-│       ├── controllers/      # Un controlador por entidad + crud.factory.js + reportes
-│       ├── middlewares/      # errorHandler.js (traduce errores del motor a HTTP)
+│       ├── server.js           # Arranque y conexión con reintentos
+│       ├── app.js              # Express y middlewares
+│       ├── config/db.js        # Conexión mssql, vars de entorno
+│       ├── routes/             # index.js (todas las rutas) y crudRouter.js
+│       ├── controllers/        # Un controlador por entidad + fábricas CRUD + reportes
+│       ├── middlewares/        # errorHandler para manejor de errores
 │       └── utils/
 ├── postman/
 │   └── ComercialLaEstrella.postman_collection.json
-└── docs/capturas/            # Evidencias de los triggers
+└── docs/capturas/              # documentacion
 ```
 
 ## 2. Modelo de datos
 
+El modelo es el aprobado en la Fase 1, traducido de Oracle a T-SQL
+
 ```mermaid
 erDiagram
-    Pais ||--o{ Departamento : tiene
-    Departamento ||--o{ Municipio : tiene
-    Municipio ||--o{ Tienda : ubica
-    Tienda ||--o{ Empleado : emplea
-    Tienda ||--o{ Venta : registra
-    Cliente ||--o{ Venta : realiza
-    Empleado ||--o{ Venta : atiende
-    Categoria ||--o{ Producto : clasifica
-    Marca ||--o{ Producto : fabrica
-    Venta ||--o{ DetalleVenta : contiene
-    Producto ||--o{ DetalleVenta : incluido_en
-    Venta ||--o{ Pago : recibe
+    PAIS ||--o{ DEPARTAMENTO : tiene
+    DEPARTAMENTO ||--o{ MUNICIPIO : tiene
+    MUNICIPIO ||--o{ TIENDA : ubica
+    MUNICIPIO ||--o{ PERSONA : reside
+    TIPO_TIENDA ||--o{ TIENDA : clasifica
+    PERSONA ||--o| EMPLEADO : es
+    PERSONA ||--o| CLIENTE : es
+    CARGO ||--o{ EMPLEADO : ocupa
+    TIENDA ||--o{ EMPLEADO : emplea
+    TIPO_IDENTIFICACION ||--o{ CLIENTE : identifica
+    CATEGORIA ||--o{ PRODUCTO : clasifica
+    MARCA ||--o{ PRODUCTO : fabrica
+    TIENDA ||--o{ CATALOGO_PRODUCTO : ofrece
+    PRODUCTO ||--o{ CATALOGO_PRODUCTO : "se ofrece en"
+    TIENDA ||--o{ VENTA : registra
+    EMPLEADO ||--o{ VENTA : atiende
+    CLIENTE ||--o{ VENTA : realiza
+    ESTADO_VENTA ||--o{ VENTA : estado
+    VENTA ||--o{ DESGLOSE_VENTA : contiene
+    PRODUCTO ||--o{ DESGLOSE_VENTA : incluido
+    VENTA ||--o{ PAGO : recibe
+    METODO_PAGO ||--o{ PAGO : medio
 ```
 
-| Tabla | Notas |
-|---|---|
-| `Venta` | `estado` ∈ {REGISTRADA, PAGADA, ANULADA}. `total` lo calcula el motor a partir del detalle. |
-| `DetalleVenta` | `precio_unitario` opcional (si no se envía se copia el precio del producto); `subtotal` es columna calculada. |
-| `Producto` | `existencia_actual` con `CHECK (>= 0)`. |
-| `Pago` | `metodo_pago` ∈ {EFECTIVO, TARJETA, TRANSFERENCIA, CHEQUE}. |
+### Cambios de Oracle (Fase 1) a SQL Server (Fase 2)
 
-## 3. Requisitos
+| Oracle | SQL Server | Motivo |
+|---|---|---|
+| `NUMBER` (ids) | `INT IDENTITY(1,1)` | El motor genera los ids |
+| `NUMBER(12,2)` / `NUMBER(10)` | `DECIMAL(12,2)` / `INT` | Tipos equivalentes |
+| `VARCHAR2` | `NVARCHAR` | Soporte de tildes y ñ |
+| `DATE` en `FECHA_VEN` | `DATETIME2(0)` | En SQL Server `DATE` no guarda la hora |
+| `UNIQUE (CORREO_PER)` | Índice único filtrado `WHERE CORREO_PER IS NOT NULL` | En SQL Server un `UNIQUE` admite un solo NULL |
+| Bloque PL/SQL de `DROP` | Eliminado | `docker compose down -v` reinicia la base |
 
-- Docker Desktop (o Docker Engine + Compose v2), mínimo 8 GB de RAM.
-- Postman.
-- Node.js 18+ (solo si se quiere ejecutar el API fuera de Docker).
-- DBeaver (solo lectura, verificación estructural).
+## 3. Requisitos para poder ejecutar
 
-> **Mac con Apple Silicon (M1/M2/M3):** la imagen de SQL Server es amd64. Activar en Docker Desktop *Settings → General → "Use Rosetta for x86_64/amd64 emulation"*. El `docker-compose.yml` ya fija `platform: linux/amd64`.
+- Docker Desktop con mínimo 8 GB de RAM.
+- Postman
+- Node.js 18+ para el backend
+- DBeaver (solo lectura)
+
+> **Mac con Apple Silicon:** la imagen de SQL Server es amd64. En Docker Desktop, activar *Settings → General → Use Rosetta for x86_64/amd64 emulation*. El `docker-compose.yml` ya fija `platform: linux/amd64`.
 
 ## 4. Levantar el entorno (paso a paso)
 
 ```bash
 # 1. Variables de entorno
-cp .env.example .env          # Windows PowerShell: copy .env.example .env
+cp .env.example .env
 
 # 2. Levantar todo (BD + inicialización + API)
 docker compose up -d --build
 
 # 3. Verificar
-docker compose ps             # sqlserver "healthy", db-init "exited (0)", api "running"
-docker logs estrella-db-init  # debe decir: init.sql ejecutado correctamente
+docker compose ps               # sqlserver "healthy", db-init "exited (0)", api "running"
+docker logs estrella-db-init    # debe terminar con: init.sql ejecutado correctamente
 curl http://localhost:3000/api/health
 ```
 
-**¿Qué pasa al hacer `up`?**
+**Qué ocurre al hacer `up`:**
 
-1. `sqlserver` arranca SQL Server 2022; su *healthcheck* espera a que acepte conexiones.
-2. `db-init` (mismo contenedor de SQL Server, solo usa `sqlcmd`) ejecuta `init.sql` **automáticamente**. Si la base ya existe, lo omite y los datos se conservan (volumen `sqlserver_data`).
-3. `api` arranca solo cuando `db-init` terminó con éxito, y se conecta con las variables `DB_HOST`, `DB_USER`, `DB_PASSWORD`, etc.
+1. **`sqlserver`** arranca SQL Server 2022. Su *healthcheck* espera a que acepte conexiones.
+2. **`db-init`** ejecuta `init.sql` automáticamente con `sqlcmd`. Si la base ya existe, lo omite y los datos se conservan en el volumen `sqlserver_data`.
+3. **`api`** arranca solo cuando `db-init` terminó con éxito y se conecta mediante variables de entorno (`DB_HOST=sqlserver`, `DB_USER`, `DB_PASSWORD`…).
 
 **Reiniciar desde cero** (borra los datos y vuelve a ejecutar `init.sql`):
 
@@ -91,96 +109,96 @@ curl http://localhost:3000/api/health
 docker compose down -v && docker compose up -d --build
 ```
 
-### Seguridad aplicada
+## 5. Endpoints
 
-- El API **no usa `sa`**: `init.sql` crea el login `api_estrella` con roles `db_datareader` y `db_datawriter` (puede leer/escribir datos, pero no modificar la estructura).
-- Todas las consultas del API son parametrizadas y los nombres de columna salen de una lista blanca por entidad.
+Base: `http://localhost:3000/api`. El índice completo está en `GET /api/`.
 
-## 5. Ejecutar el API fuera de Docker (opcional)
-
-Con la BD levantada (`docker compose up -d sqlserver db-init`):
-
-```bash
-cd api
-cp .env.example .env
-npm install
-npm start            # o: npm run dev (recarga automática)
-```
-
-## 6. Endpoints
-
-Base: `http://localhost:3000/api`
-
-| Recurso | Ruta | DELETE |
-|---|---|---|
-| Países | `/paises` | físico |
-| Departamentos | `/departamentos` | físico |
-| Municipios | `/municipios` | físico |
-| Categorías | `/categorias` | físico |
-| Marcas | `/marcas` | físico |
-| Tiendas | `/tiendas` | lógico (`activo = 0`) |
-| Empleados | `/empleados` | lógico (`activo = 0`) |
-| Clientes | `/clientes` | lógico (`activo = 0`) |
-| Productos | `/productos` | lógico (`activo = 0`) |
-| Ventas | `/ventas` | lógico (`estado = 'ANULADA'`, devuelve inventario) |
-| Detalles de venta | `/detalles-venta` | físico (devuelve inventario) |
-| Pagos | `/pagos` | físico (recalcula estado) |
+| Recurso | Ruta | Llave | DELETE |
+|---|---|---|---|
+| Países | `/paises` | `ID_PA` | físico |
+| Departamentos | `/departamentos` | `ID_DEP` | físico |
+| Municipios | `/municipios` | `ID_MUN` | físico |
+| Tipos de tienda | `/tipos-tienda` | `ID_TIP_TIE` | físico |
+| Tipos de identificación | `/tipos-identificacion` | `ID_TIP_IDE` | físico |
+| Cargos | `/cargos` | `ID_CAR` | físico |
+| Categorías | `/categorias` | `ID_CAT` | físico |
+| Marcas | `/marcas` | `ID_MAR` | físico |
+| Estados de venta | `/estados-venta` | `ID_ES_VEN` | físico (los 4 estados base están protegidos) |
+| Métodos de pago | `/metodos-pago` | `ID_MET_PAG` | físico |
+| Tiendas | `/tiendas` | `ID_TI` | físico |
+| Productos | `/productos` | `ID_PRO` | físico |
+| Personas | `/personas` | `ID_PER` | físico |
+| Clientes | `/clientes` | `ID_CLI` | físico (también borra su PERSONA) |
+| Empleados | `/empleados` | `ID_EMP` | físico (también borra su PERSONA) |
+| Catálogo de productos | `/catalogo-productos/:ID_TI/:ID_PRO` | compuesta | físico |
+| Ventas | `/ventas` | `ID_VEN` | **lógico**: estado ANULADA y devuelve el inventario |
+| Desglose de venta | `/desglose-venta/:ID_VEN/:ID_PRO` | compuesta | físico (devuelve el inventario) |
+| Pagos | `/pagos` | `ID_PAG` | físico (recalcula el estado) |
 
 Cada recurso tiene:
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/recurso` | Lista todo. Acepta filtros: `?id_venta=3`, `?nit=CF` |
-| GET | `/recurso/:id` | Busca por id (404 si no existe) |
-| POST | `/recurso` | Crea. **Carga masiva:** enviar un arreglo JSON (se inserta en una transacción) |
+| GET | `/recurso` | Lista todo. Acepta filtros por columna: `?ID_TI=1` |
+| GET | `/recurso/:id` | Busca por llave (404 si no existe) |
+| POST | `/recurso` | Crea. **Carga masiva:** enviar un arreglo JSON (todo en una transacción) |
 | PUT | `/recurso/:id` | Actualiza los campos enviados |
-| DELETE | `/recurso/:id` | Elimina (físico o lógico según la tabla) |
+| DELETE | `/recurso/:id` | Elimina (físico o lógico) |
 
-Extras:
+Detalles relevantes:
 
-| Método | Ruta | Descripción |
-|---|---|---|
-| GET | `/ventas/:id/completa` | Venta con su detalle y pagos |
-| GET | `/reportes/ventas-ubicacion` | `SELECT * FROM Vista_Ventas_Ubicacion` |
-| GET | `/reportes/top-productos` | `SELECT * FROM Vista_Top_Productos` |
-| GET | `/reportes/saldos-pendientes` | `SELECT * FROM Vista_Saldos_Pendientes` |
-| GET | `/health` | Estado del API y de la conexión |
+- **Clientes y empleados** reciben un JSON plano con los datos de `PERSONA` y los propios. El API inserta `PERSONA` y luego `CLIENTE`/`EMPLEADO` en **una sola transacción**: si falla uno, se revierten ambos.
+- **Desglose de venta:** el API completa `PRECIO_UNITARIO_DES_VEN` con el precio vigente del catálogo de la tienda de la venta y calcula `SUBTOTAL_DES_VEN`. Son `NOT NULL` y el `CHECK` del subtotal se evalúa antes del trigger.
+- **Ventas:** `GET` agrega `ESTADO`, `TOTAL` (suma del desglose) y `PAGADO`. El estado PAGADA no se puede asignar por API; solo lo pone el motor.
+
+| Extra | Descripción |
+|---|---|
+| `GET /ventas/:ID_VEN/completa` | Venta con su desglose y sus pagos |
+| `GET /reportes/ventas-ubicacion` | `SELECT * FROM Vista_Ventas_Ubicacion` |
+| `GET /reportes/top-productos` | `SELECT * FROM Vista_Top_Productos` |
+| `GET /reportes/saldos-pendientes` | `SELECT * FROM Vista_Saldos_Pendientes` |
+| `GET /health` | Estado del API y de la conexión |
 
 ### Códigos de respuesta
 
 | Código | Cuándo |
 |---|---|
 | 200 / 201 | Éxito |
-| 400 | Error de validación, regla de negocio del trigger (ej. `"Stock insuficiente"`), FK inexistente, CHECK, campo obligatorio |
+| 400 | Regla de negocio de un trigger (ej. `"Stock insuficiente"`), validación, FK inexistente, CHECK, campo obligatorio, JSON inválido |
 | 404 | Registro o ruta inexistente |
 | 409 | Valor único duplicado, o eliminar un registro referenciado |
 | 503 | Sin conexión con la base de datos |
 
-## 7. Lógica en el motor
+## 6. Lógica en el motor
 
-### Trigger 1 — `Insert_Detalle` (AFTER INSERT en `DetalleVenta`)
+### Trigger 1: `Insert_Detalle` (AFTER INSERT en `DESGLOSE_VENTA`)
 
-1. Si la venta no está `REGISTRADA` → `RAISERROR` + `ROLLBACK`.
-2. Agrupa `INSERTED` por producto y compara contra `existencia_actual`. Si se pide más de lo que hay → `RAISERROR('Stock insuficiente', 16, 1)` + `ROLLBACK TRANSACTION` (el detalle no queda guardado).
-3. Si es válido: descuenta la cantidad del inventario, copia el precio del producto si no se envió y recalcula `Venta.total`.
+1. Si la venta no está `REGISTRADA`, ejecuta `RAISERROR` + `ROLLBACK`.
+2. Agrupa `INSERTED` por (tienda de la venta, producto) y lo une con `CATALOGO_PRODUCTO`. Si la cantidad supera `EXISTENCIA_ACTUAL_CAT_PRO`, o el producto no está en el catálogo de esa tienda, ejecuta `RAISERROR('Stock insuficiente', 16, 1)` + `ROLLBACK TRANSACTION`, y la línea no queda guardada.
+3. Si es válido, descuenta la cantidad del inventario de esa tienda.
 
-### Trigger 2 — `Insert_Pago` (AFTER INSERT en `Pago`)
+### Trigger 2: `Insert_Pago` (AFTER INSERT en `PAGO`)
 
 1. Rechaza pagos a ventas `ANULADA` o ya `PAGADA`.
-2. Suma **todos** los pagos de la venta; si la suma `>= total` actualiza el estado a `PAGADA`.
+2. Suma **todos** los pagos de la venta y los compara con el total (`SUM(SUBTOTAL_DES_VEN)`). Si pagado ≥ total, cambia el estado a `PAGADA`. Los ids de estado se buscan por nombre.
 
-### Triggers complementarios (consistencia del CRUD)
+### Triggers complementarios
 
 | Trigger | Función |
 |---|---|
-| `Update_Detalle` | Al cambiar cantidad/producto: devuelve lo anterior (`DELETED`), descuenta lo nuevo (`INSERTED`), valida stock y recalcula total |
-| `Delete_Detalle` | Devuelve el inventario y recalcula el total |
-| `Recalcular_Estado_Pago` | Al editar/eliminar un pago, recalcula PAGADA/REGISTRADA |
+| `Update_Detalle` | Al cambiar una línea: devuelve lo anterior (`DELETED`), descuenta lo nuevo (`INSERTED`) y valida el stock |
+| `Delete_Detalle` | Devuelve el inventario a la tienda |
+| `Recalcular_Estado_Pago` | Al editar o eliminar un pago, recalcula PAGADA / REGISTRADA |
 | `Anular_Venta` | Al anular una venta devuelve el inventario; impide reactivar una venta anulada |
+
+**Conceptos clave:**
+
+- Los triggers se disparan **una vez por sentencia**, no por fila. Por eso trabajan sobre `INSERTED`/`DELETED` con `JOIN` y `GROUP BY`.
+- Corren **dentro de la transacción** del `INSERT`. Un `ROLLBACK` deshace también la fila que lo disparó.
 
 ### Cómo llega el error del trigger al API
 
-Con `RAISERROR` + `ROLLBACK`, SQL Server envía el error **50000** (nuestro mensaje) seguido del **3609** ("la transacción terminó en el trigger"). `middlewares/errorHandler.js` revisa todos los errores (`err.precedingErrors`) y si encuentra uno `>= 50000` responde **HTTP 400** con ese mensaje:
+Con `RAISERROR` + `ROLLBACK`, SQL Server envía el error **50000** (el mensaje) seguido del **3609** ("la transacción terminó en el trigger"). `middlewares/errorHandler.js` recorre todos los errores (`err.precedingErrors`) y, si encuentra uno ≥ 50000, responde **HTTP 400**:
 
 ```json
 { "error": "Stock insuficiente", "origen": "trigger" }
@@ -188,63 +206,44 @@ Con `RAISERROR` + `ROLLBACK`, SQL Server envía el error **50000** (nuestro mens
 
 ### Vistas
 
+Una vista no guarda datos: se recalcula en cada consulta. Como el modelo no almacena el total de la venta, se calcula como `SUM(SUBTOTAL_DES_VEN)`.
+
 | Vista | Lógica |
 |---|---|
-| `Vista_Ventas_Ubicacion` | `Tienda → Municipio → Departamento → País` con `LEFT JOIN Venta` (condición `estado <> 'ANULADA'` dentro del `ON` para conservar tiendas sin ventas). `COUNT` y `SUM(total)` por tienda. |
-| `Vista_Top_Productos` | `DetalleVenta` unido a ventas no anuladas, producto, categoría y marca. `SUM(cantidad)` y `SUM(cantidad * precio_unitario)`. |
-| `Vista_Saldos_Pendientes` | Ventas `REGISTRADA`; los pagos se suman en una subconsulta (para no duplicar filas) y se unen con `LEFT JOIN`; `saldo = total − pagado`. |
+| `Vista_Ventas_Ubicacion` | `TIENDA → MUNICIPIO → DEPARTAMENTO → PAIS` con `LEFT JOIN` a las ventas no anuladas (pre-agregadas con su total), para incluir tiendas sin ventas. `COUNT` y `SUM` por tienda. |
+| `Vista_Top_Productos` | `DESGLOSE_VENTA` unido a ventas no anuladas, producto, categoría y marca. `SUM(CANTIDAD_DES_VEN)` y `SUM(SUBTOTAL_DES_VEN)`. El código es `ID_PRO`. |
+| `Vista_Saldos_Pendientes` | Ventas `REGISTRADA`. Desglose y pagos se suman en **subconsultas separadas** (un JOIN directo duplicaría filas y alteraría las sumas) y se unen con `LEFT JOIN`. Saldo = total − pagado. |
 
-## 8. Pruebas con Postman
+## 7. Pruebas con Postman
 
-1. Importar `postman/ComercialLaEstrella.postman_collection.json`.
+1. Importar `postman/ComercialLaEstrella.postman_collection.json` (**File → Import**).
 2. La variable `baseUrl` ya apunta a `http://localhost:3000`.
-3. Ejecutar la carpeta **"Escenarios de Triggers (ejecutar en orden)"** con el *Runner* (o petición por petición). Cada petición trae *tests* automáticos:
+3. Ejecutar la colección con el **Runner**. Resultado: **215 tests, 0 fallidos**.
 
-| # | Petición | Resultado esperado |
+![Runner de Postman](docs/capturas/00-runner.png)
+
+La carpeta **01 - Escenarios de Triggers** reproduce los escenarios de la sección 3.2-B:
+
+| Paso | Petición | Resultado |
 |---|---|---|
-| 1 | Crear venta | 201, estado REGISTRADA, total 0 |
-| 2 | GET producto 5 | guarda la existencia inicial |
-| 3 | POST detalle con existencia + 1 | **400 "Stock insuficiente"** |
-| 4 | GET producto 5 | existencia sin cambios (ROLLBACK) |
-| 5 | POST detalle cantidad 2 | 201 |
-| 6 | GET producto 5 | **existencia reducida en 2** |
-| 7 | GET venta | total 1798.00 calculado por el motor |
-| 8–10 | Dos abonos de Q500 | 201, la venta sigue REGISTRADA |
-| 11 | Saldos pendientes | pagado 1000, saldo 798 |
-| 12 | Pago final | 201 |
-| 13 | GET venta | **estado PAGADA** |
-| 14 | Saldos pendientes | la venta ya no aparece |
-| 15 | Agregar producto a venta pagada | 400 |
+| 0–2 | Reabastecer, crear venta y leer existencia | Venta REGISTRADA |
+| 3 | `POST /desglose-venta` con existencia + 1 | **400 "Stock insuficiente"** |
+| 4 | `GET /catalogo-productos/1/5` | Existencia sin cambios (ROLLBACK) |
+| 5 | `POST /desglose-venta` con cantidad 2 | **201** |
+| 6 | `GET /catalogo-productos/1/5` | **Existencia reducida en 2** |
+| 7 | `GET /ventas/:id` | Total 1798, REGISTRADA |
+| 8–10 | Dos abonos de Q500 | 201, sigue REGISTRADA |
+| 11 | Saldos pendientes | Pagado 1000, saldo 798 |
+| 12–13 | Pago final de Q798 y `GET /ventas/:id` | **ESTADO = PAGADA** |
+| 14–17 | Saldos, pago extra, producto extra, venta completa | Fuera de la vista; 400; 400; detalle completo |
 
-El resto de carpetas contiene el CRUD completo de cada tabla, la carga masiva de clientes y los tres reportes.
+El resto de carpetas cubre el CRUD de las 19 tablas, la carga masiva, la atomicidad de clientes, la anulación de ventas, los reportes y la validación de errores.
 
-## 9. Evidencias (capturas)
 
-> Reemplazar con capturas propias de Postman.
+## 8. Verificación con DBeaver (solo lectura)
 
-**Escenario 1 — Stock insuficiente (400)**
-![Stock insuficiente](docs/capturas/01-stock-insuficiente.png)
+1. Crear una conexión SQL Server con host `localhost`, puerto `1433`, base `ComercialLaEstrella`, usuario `sa` y la contraseña de `.env`.
+2. En **Driver properties**, poner `trustServerCertificate = true`.
+3. En **Edit Connection → General**, marcar **Read-only connection**.
 
-**Escenario 2 — Detalle válido y existencia reducida**
-![Detalle registrado](docs/capturas/02-detalle-exitoso.png)
-![Existencia reducida](docs/capturas/03-existencia-reducida.png)
-
-**Escenario 3 — Abonos parciales y estado PAGADA**
-![Abono parcial](docs/capturas/04-abono-parcial.png)
-![Venta pagada](docs/capturas/05-venta-pagada.png)
-
-**Vistas**
-![Reportes](docs/capturas/06-vistas.png)
-
-## 10. Verificación con DBeaver (solo lectura)
-
-Nueva conexión SQL Server → Host `localhost`, puerto `1433`, base `ComercialLaEstrella`, usuario `sa` (contraseña de `.env`). En *Connection settings → General* marcar **"Read-only connection"**. Usarlo solo para revisar tablas, vistas y triggers; toda manipulación de datos se hace por el API.
-
-## 11. Problemas comunes
-
-| Síntoma | Solución |
-|---|---|
-| `sqlserver` se reinicia | Revisar que `SA_PASSWORD` cumpla la política (mayúscula, minúscula, número, símbolo, 8+ caracteres) y que Docker tenga ≥ 2 GB de RAM asignados |
-| El puerto 1433 o 3000 está ocupado | Cambiar `DB_PORT` o `API_PORT` en `.env` |
-| Cambié `init.sql` y no se aplica | El script solo corre si la base no existe: `docker compose down -v` y volver a levantar |
-| `api` no arranca | `docker logs estrella-db-init` para ver el error del script |
+Se usa únicamente para revisar tablas, vistas y triggers. Toda manipulación de datos se hace por el API.
