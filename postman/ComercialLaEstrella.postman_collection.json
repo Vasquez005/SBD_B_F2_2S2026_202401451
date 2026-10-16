@@ -1,0 +1,4617 @@
+{
+  "info": {
+    "name": "Comercial La Estrella - API REST (BD1 Fase 2)",
+    "description": "CRUD de todas las tablas, carga masiva, reportes (vistas) y escenarios de los triggers.\nEjecutar primero la carpeta 01 con el Runner.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Estado",
+      "item": [
+        {
+          "name": "Health check (API + BD)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/health"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('BD conectada', () => pm.expect(pm.response.json().db).to.eql('ok'));",
+                  "pm.test('Usa el usuario de mínimo privilegio', () => pm.expect(pm.response.json().usuario).to.eql('api_estrella'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Índice de endpoints",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Escenarios de Triggers (ejecutar en orden)",
+      "item": [
+        {
+          "name": "0. Preparar: reabastecer horno microondas en tienda 1 (20 u.)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/5",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"EXISTENCIA_ACTUAL_CAT_PRO\": 20\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Deja el inventario en un valor conocido para que los escenarios se puedan repetir."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "1. Crear venta de prueba (tienda 1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/ventas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_TI\": 1,\n  \"ID_EMP\": 1,\n  \"ID_CLI\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const v = pm.response.json();",
+                  "pm.collectionVariables.set('id_venta_prueba', v.ID_VEN);",
+                  "pm.test('Nace REGISTRADA (ID_ES_VEN = 1)', () => pm.expect(v.ID_ES_VEN).to.eql(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Consultar existencia inicial (tienda 1, producto 5)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/5"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const c = pm.response.json();",
+                  "pm.collectionVariables.set('existencia_inicial', c.EXISTENCIA_ACTUAL_CAT_PRO);",
+                  "pm.collectionVariables.set('cantidad_excedida', c.EXISTENCIA_ACTUAL_CAT_PRO + 1);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. [Insert_Detalle] FALLO: Stock insuficiente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/desglose-venta",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{id_venta_prueba}},\n  \"ID_PRO\": 5,\n  \"CANTIDAD_DES_VEN\": {{cantidad_excedida}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Pide existencia + 1. El trigger hace RAISERROR + ROLLBACK y el API responde 400."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mensaje \"Stock insuficiente\"', () => pm.expect(pm.response.json().error).to.eql('Stock insuficiente'));",
+                  "pm.test('Lo lanzó el trigger', () => pm.expect(pm.response.json().origen).to.eql('trigger'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Inventario sin cambios (ROLLBACK)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/5"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Existencia intacta', () => pm.expect(pm.response.json().EXISTENCIA_ACTUAL_CAT_PRO).to.eql(Number(pm.collectionVariables.get('existencia_inicial'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. [Insert_Detalle] ÉXITO: cantidad válida (2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/desglose-venta",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{id_venta_prueba}},\n  \"ID_PRO\": 5,\n  \"CANTIDAD_DES_VEN\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json();",
+                  "pm.test('Precio tomado del catálogo (899)', () => pm.expect(d.PRECIO_UNITARIO_DES_VEN).to.eql(899));",
+                  "pm.test('Subtotal = 1798', () => pm.expect(d.SUBTOTAL_DES_VEN).to.eql(1798));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. GET catálogo: existencia reducida automáticamente",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/5"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Existencia = inicial - 2', () => pm.expect(pm.response.json().EXISTENCIA_ACTUAL_CAT_PRO).to.eql(Number(pm.collectionVariables.get('existencia_inicial')) - 2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. GET venta: total 1798, REGISTRADA",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{id_venta_prueba}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const v = pm.response.json();",
+                  "pm.test('TOTAL = 1798', () => pm.expect(v.TOTAL).to.eql(1798));",
+                  "pm.test('ESTADO = REGISTRADA', () => pm.expect(v.ESTADO).to.eql('REGISTRADA'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. [Insert_Pago] Abono parcial 1 (Q500)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/pagos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{id_venta_prueba}},\n  \"MONTO_PAG\": 500,\n  \"ID_MET_PAG\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "9. GET venta: sigue REGISTRADA",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{id_venta_prueba}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ESTADO = REGISTRADA', () => pm.expect(pm.response.json().ESTADO).to.eql('REGISTRADA'));",
+                  "pm.test('PAGADO = 500', () => pm.expect(pm.response.json().PAGADO).to.eql(500));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10. [Insert_Pago] Abono parcial 2 (Q500)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/pagos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{id_venta_prueba}},\n  \"MONTO_PAG\": 500,\n  \"ID_MET_PAG\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11. Vista_Saldos_Pendientes: saldo 798",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/reportes/saldos-pendientes"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const id = Number(pm.collectionVariables.get('id_venta_prueba'));",
+                  "const fila = pm.response.json().find(r => r.ID_VEN === id);",
+                  "pm.test('La venta aparece', () => pm.expect(fila).to.exist);",
+                  "pm.test('Pagado 1000, saldo 798', () => { pm.expect(fila.MONTO_PAGADO).to.eql(1000); pm.expect(fila.SALDO_PENDIENTE).to.eql(798); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12. [Insert_Pago] Pago final (Q798)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/pagos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{id_venta_prueba}},\n  \"MONTO_PAG\": 798,\n  \"ID_MET_PAG\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13. GET venta: PAGADA (asignado por el motor)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{id_venta_prueba}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ESTADO = PAGADA', () => pm.expect(pm.response.json().ESTADO).to.eql('PAGADA'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14. Saldos pendientes ya no incluye la venta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/reportes/saldos-pendientes"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "const id = Number(pm.collectionVariables.get('id_venta_prueba'));",
+                  "pm.test('Fuera de la vista', () => pm.expect(pm.response.json().find(r => r.ID_VEN === id)).to.be.undefined);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15. Pago a venta PAGADA (espera 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/pagos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{id_venta_prueba}},\n  \"MONTO_PAG\": 10,\n  \"ID_MET_PAG\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mensaje del trigger', () => pm.expect(pm.response.json().error).to.eql('La venta ya se encuentra PAGADA'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16. Agregar producto a venta PAGADA (espera 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/desglose-venta",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{id_venta_prueba}},\n  \"ID_PRO\": 8,\n  \"CANTIDAD_DES_VEN\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17. Venta completa (desglose + pagos)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{id_venta_prueba}}/completa"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('1 línea de desglose y 3 pagos', () => { const v = pm.response.json(); pm.expect(v.desglose.length).to.eql(1); pm.expect(v.pagos.length).to.eql(3); });"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Escenarios de la sección 3.2-B del enunciado. Ejecutar la carpeta completa con el Runner."
+    },
+    {
+      "name": "02 - Anulación de venta (trigger Anular_Venta)",
+      "item": [
+        {
+          "name": "1. Reabastecer cafetera en tienda 1 (12 u.)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/8",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"EXISTENCIA_ACTUAL_CAT_PRO\": 12\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Crear venta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/ventas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_TI\": 1,\n  \"ID_EMP\": 2,\n  \"ID_CLI\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('id_venta_anular', pm.response.json().ID_VEN);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. Agregar 3 cafeteras",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/desglose-venta",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{id_venta_anular}},\n  \"ID_PRO\": 8,\n  \"CANTIDAD_DES_VEN\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Existencia tras la venta (9)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/8"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Existencia = 9', () => pm.expect(pm.response.json().EXISTENCIA_ACTUAL_CAT_PRO).to.eql(9));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. DELETE venta = anular",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{id_venta_anular}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ESTADO = ANULADA', () => pm.expect(pm.response.json().registro.ESTADO).to.eql('ANULADA'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "6. Existencia devuelta (12)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/8"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Existencia = 12', () => pm.expect(pm.response.json().EXISTENCIA_ACTUAL_CAT_PRO).to.eql(12));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Reactivar venta anulada (espera 400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/ventas/{{id_venta_anular}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_ES_VEN\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Mensaje del trigger', () => pm.expect(pm.response.json().error).to.eql('Una venta ANULADA no puede reactivarse'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Países",
+      "item": [
+        {
+          "name": "Crear Países",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/paises",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_PA\": \"Honduras {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_PA_nuevo', pm.response.json().ID_PA);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Países",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/paises"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Países por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/paises/{{ID_PA_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Países",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/paises/{{ID_PA_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_PA\": \"Honduras C.A. {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Países",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/paises/{{ID_PA_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Departamentos",
+      "item": [
+        {
+          "name": "Crear Departamentos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/departamentos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_DEP\": \"Escuintla {{$timestamp}}\",\n  \"ID_PA\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_DEP_nuevo', pm.response.json().ID_DEP);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Departamentos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/departamentos"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Departamentos por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/departamentos/{{ID_DEP_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Departamentos",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/departamentos/{{ID_DEP_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_DEP\": \"Escuintla (editado) {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Departamentos",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/departamentos/{{ID_DEP_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Municipios",
+      "item": [
+        {
+          "name": "Filtrar municipios (?ID_DEP=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/municipios?ID_DEP=1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear Municipios",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/municipios",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_MUN\": \"Villa Nueva {{$timestamp}}\",\n  \"ID_DEP\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_MUN_nuevo', pm.response.json().ID_MUN);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Municipios",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/municipios"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Municipios por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/municipios/{{ID_MUN_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Municipios",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/municipios/{{ID_MUN_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_MUN\": \"Villa Nueva (editado) {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Municipios",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/municipios/{{ID_MUN_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tipos de tienda",
+      "item": [
+        {
+          "name": "Crear Tipos de tienda",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/tipos-tienda",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_TIP_TIE\": \"Outlet {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_TIP_TIE_nuevo', pm.response.json().ID_TIP_TIE);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Tipos de tienda",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/tipos-tienda"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Tipos de tienda por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/tipos-tienda/{{ID_TIP_TIE_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Tipos de tienda",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/tipos-tienda/{{ID_TIP_TIE_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_TIP_TIE\": \"Outlet (editado) {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Tipos de tienda",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/tipos-tienda/{{ID_TIP_TIE_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Tipos de identificación",
+      "item": [
+        {
+          "name": "Crear Tipos de identificación",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/tipos-identificacion",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_TIP_IDE\": \"Licencia {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_TIP_IDE_nuevo', pm.response.json().ID_TIP_IDE);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Tipos de identificación",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/tipos-identificacion"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Tipos de identificación por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/tipos-identificacion/{{ID_TIP_IDE_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Tipos de identificación",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/tipos-identificacion/{{ID_TIP_IDE_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_TIP_IDE\": \"Lic. {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Tipos de identificación",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/tipos-identificacion/{{ID_TIP_IDE_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cargos",
+      "item": [
+        {
+          "name": "Crear Cargos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/cargos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_CAR\": \"Supervisor {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_CAR_nuevo', pm.response.json().ID_CAR);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Cargos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/cargos"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Cargos por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/cargos/{{ID_CAR_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Cargos",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/cargos/{{ID_CAR_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_CAR\": \"Supervisor (editado) {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Cargos",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/cargos/{{ID_CAR_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Categorías",
+      "item": [
+        {
+          "name": "Crear Categorías",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/categorias",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_CAT\": \"Jardinería {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_CAT_nuevo', pm.response.json().ID_CAT);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Categorías",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/categorias"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Categorías por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/categorias/{{ID_CAT_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Categorías",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/categorias/{{ID_CAT_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_CAT\": \"Jardín {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Categorías",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/categorias/{{ID_CAT_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Marcas",
+      "item": [
+        {
+          "name": "Carga masiva de marcas (arreglo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/marcas",
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"NOMBRE_MAR\": \"Whirlpool {{$timestamp}}\"\n  },\n  {\n    \"NOMBRE_MAR\": \"Panasonic {{$timestamp}}\"\n  }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Insertó 2', () => pm.expect(pm.response.json().insertados).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear Marcas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/marcas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_MAR\": \"Philips {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_MAR_nuevo', pm.response.json().ID_MAR);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Marcas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/marcas"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Marcas por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/marcas/{{ID_MAR_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Marcas",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/marcas/{{ID_MAR_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_MAR\": \"Philips (editado) {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Marcas",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/marcas/{{ID_MAR_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Métodos de pago",
+      "item": [
+        {
+          "name": "Crear Métodos de pago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/metodos-pago",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_MET_PAG\": \"Cheque {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_MET_PAG_nuevo', pm.response.json().ID_MET_PAG);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Métodos de pago",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/metodos-pago"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Métodos de pago por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/metodos-pago/{{ID_MET_PAG_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Métodos de pago",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/metodos-pago/{{ID_MET_PAG_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_MET_PAG\": \"Cheque (editado) {{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Métodos de pago",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/metodos-pago/{{ID_MET_PAG_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Estados de venta",
+      "item": [
+        {
+          "name": "Crear Estados de venta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/estados-venta",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_ES_VEN\": \"EN_REV_{{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_ES_VEN_nuevo', pm.response.json().ID_ES_VEN);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Estados de venta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/estados-venta"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Estados de venta por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/estados-venta/{{ID_ES_VEN_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Estados de venta",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/estados-venta/{{ID_ES_VEN_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_ES_VEN\": \"REVISION_{{$timestamp}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Modificar estado PAGADA (espera 400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/estados-venta/3",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_ES_VEN\": \"X\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Estados de venta",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/estados-venta/{{ID_ES_VEN_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "REGISTRADA, PENDIENTE, PAGADA y ANULADA están protegidos: los usan los triggers."
+    },
+    {
+      "name": "Tiendas",
+      "item": [
+        {
+          "name": "Crear Tiendas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/tiendas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_TI\": \"La Estrella Mixco\",\n  \"DIRECCION_TI\": \"Calzada Roosevelt 12-34, Zona 7\",\n  \"TELEFONO_TI\": \"2433-1000\",\n  \"ID_MUN\": 2,\n  \"ID_TIP_TIE\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_TI_nuevo', pm.response.json().ID_TI);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Tiendas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/tiendas"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Tiendas por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/tiendas/{{ID_TI_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Tiendas",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/tiendas/{{ID_TI_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"TELEFONO_TI\": \"2433-1001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Tiendas",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/tiendas/{{ID_TI_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Productos",
+      "item": [
+        {
+          "name": "Filtrar productos (?ID_CAT=2)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/productos?ID_CAT=2"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear Productos",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/productos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_PRO\": \"Plancha de vapor\",\n  \"DESCRIPCION_PRO\": \"Plancha 1200W\",\n  \"ID_CAT\": 2,\n  \"ID_MAR\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_PRO_nuevo', pm.response.json().ID_PRO);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Productos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/productos"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Productos por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/productos/{{ID_PRO_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Productos",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/productos/{{ID_PRO_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"DESCRIPCION_PRO\": \"Plancha de vapor 1400W\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Productos",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/productos/{{ID_PRO_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Personas",
+      "item": [
+        {
+          "name": "Crear Personas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/personas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_PER\": \"Elena\",\n  \"APELLIDO_PER\": \"Barrios\",\n  \"TELEFONO\": \"3131-2020\",\n  \"CORREO_PER\": \"ebarrios{{$timestamp}}@example.com\",\n  \"DIRECCION_PER\": \"Zona 5, Guatemala\",\n  \"ID_MUN\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_PER_nuevo', pm.response.json().ID_PER);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Personas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/personas"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Personas por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/personas/{{ID_PER_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Personas",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/personas/{{ID_PER_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"TELEFONO\": \"3131-0000\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Personas",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/personas/{{ID_PER_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Clientes (PERSONA + CLIENTE)",
+      "item": [
+        {
+          "name": "Contar personas antes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/personas"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('personas_antes', pm.response.json().length);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear cliente (crea PERSONA y CLIENTE en una transacción)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/clientes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_PER\": \"Carlos\",\n  \"APELLIDO_PER\": \"Ramírez\",\n  \"TELEFONO\": \"4444-9876\",\n  \"CORREO_PER\": \"carlos{{$timestamp}}@example.com\",\n  \"DIRECCION_PER\": \"Zona 10, Guatemala\",\n  \"ID_MUN\": 1,\n  \"ID_TIP_IDE\": 2,\n  \"NUMERO_IDENTIFICACION\": \"{{nit_prueba}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('nit_prueba', 'N' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_CLI_nuevo', pm.response.json().ID_CLI);",
+                  "pm.test('Incluye datos de persona', () => pm.expect(pm.response.json().NOMBRE_PER).to.eql('Carlos'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Atomicidad: cliente con identificación duplicada (espera 409)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/clientes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_PER\": \"Carlos\",\n  \"APELLIDO_PER\": \"Ramírez\",\n  \"TELEFONO\": \"4444-9876\",\n  \"CORREO_PER\": \"otro{{$timestamp}}@example.com\",\n  \"DIRECCION_PER\": \"Zona 10, Guatemala\",\n  \"ID_MUN\": 1,\n  \"ID_TIP_IDE\": 2,\n  \"NUMERO_IDENTIFICACION\": \"{{nit_prueba}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "La PERSONA se inserta primero, pero falla el CLIENTE por UQ_CLI_IDENT: el ROLLBACK deshace ambos."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Atomicidad: solo hay 1 persona nueva (no 2)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/personas"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Personas = antes + 1', () => pm.expect(pm.response.json().length).to.eql(Number(pm.collectionVariables.get('personas_antes')) + 1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar clientes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/clientes"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener cliente por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/clientes/{{ID_CLI_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar cliente (PERSONA y CLIENTE)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/clientes/{{ID_CLI_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"TELEFONO\": \"3030-0000\",\n  \"DIRECCION_PER\": \"Zona 14, Guatemala\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Teléfono actualizado', () => pm.expect(pm.response.json().TELEFONO).to.eql('3030-0000'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Carga masiva de clientes (arreglo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/clientes",
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"NOMBRE_PER\": \"Lucía\",\n    \"APELLIDO_PER\": \"Pineda\",\n    \"TELEFONO\": \"5050-1111\",\n    \"DIRECCION_PER\": \"Zona 1\",\n    \"ID_MUN\": 1,\n    \"ID_TIP_IDE\": 1,\n    \"NUMERO_IDENTIFICACION\": \"A{{$timestamp}}\"\n  },\n  {\n    \"NOMBRE_PER\": \"Marco\",\n    \"APELLIDO_PER\": \"Arriaga\",\n    \"TELEFONO\": \"5050-2222\",\n    \"DIRECCION_PER\": \"Mixco\",\n    \"ID_MUN\": 2,\n    \"ID_TIP_IDE\": 3,\n    \"NUMERO_IDENTIFICACION\": \"B{{$timestamp}}\"\n  }\n]",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Insertó 2', () => pm.expect(pm.response.json().insertados).to.eql(2));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar cliente (y su persona)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/clientes/{{ID_CLI_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar cliente con ventas (espera 409)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/clientes/1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "POST/PUT reciben un JSON plano; el API escribe PERSONA y CLIENTE en una sola transacción."
+    },
+    {
+      "name": "Empleados (PERSONA + EMPLEADO)",
+      "item": [
+        {
+          "name": "Empleados de la tienda 1 (?ID_TI=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/empleados?ID_TI=1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear Empleados (PERSONA + EMPLEADO)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/empleados",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_PER\": \"Pedro\",\n  \"APELLIDO_PER\": \"Gómez\",\n  \"TELEFONO\": \"5555-1234\",\n  \"CORREO_PER\": \"pgomez{{$timestamp}}@laestrella.com\",\n  \"DIRECCION_PER\": \"Zona 11, Guatemala\",\n  \"ID_MUN\": 1,\n  \"FECHA_CONTRATACION\": \"2026-10-01\",\n  \"ID_TI\": 1,\n  \"ID_CAR\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_EMP_nuevo', pm.response.json().ID_EMP);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar Empleados (PERSONA + EMPLEADO)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/empleados"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener Empleados (PERSONA + EMPLEADO) por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/empleados/{{ID_EMP_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar Empleados (PERSONA + EMPLEADO)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/empleados/{{ID_EMP_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_CAR\": 2,\n  \"TELEFONO\": \"5555-4321\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar Empleados (PERSONA + EMPLEADO)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/empleados/{{ID_EMP_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Catálogo de productos (llave compuesta)",
+      "item": [
+        {
+          "name": "Preparar: crear producto nuevo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/productos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_PRO\": \"Ventilador de torre\",\n  \"DESCRIPCION_PRO\": \"3 velocidades\",\n  \"ID_CAT\": 2,\n  \"ID_MAR\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_PRO_cat', pm.response.json().ID_PRO);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear entrada de catálogo (tienda 1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/catalogo-productos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_TI\": 1,\n  \"ID_PRO\": {{ID_PRO_cat}},\n  \"PRECIO_VIGENTE_CAT_PRO\": 550.0,\n  \"EXISTENCIA_ACTUAL_CAT_PRO\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar catálogo de la tienda 1 (?ID_TI=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos?ID_TI=1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener por llave compuesta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/{{ID_PRO_cat}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar precio y existencia",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/{{ID_PRO_cat}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"PRECIO_VIGENTE_CAT_PRO\": 525.0,\n  \"EXISTENCIA_ACTUAL_CAT_PRO\": 15\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Existencia negativa (espera 400, CHECK)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/{{ID_PRO_cat}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"EXISTENCIA_ACTUAL_CAT_PRO\": -1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar entrada de catálogo",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos/1/{{ID_PRO_cat}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Limpiar: eliminar producto",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/productos/{{ID_PRO_cat}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ventas",
+      "item": [
+        {
+          "name": "Crear venta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/ventas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_TI\": 2,\n  \"ID_EMP\": 3,\n  \"ID_CLI\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_VEN_crud', pm.response.json().ID_VEN);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar ventas (con ESTADO, TOTAL y PAGADO)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Filtrar ventas de la tienda 1 (?ID_TI=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas?ID_TI=1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener venta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{ID_VEN_crud}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar cliente de la venta",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/ventas/{{ID_VEN_crud}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_CLI\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Marcar PAGADA desde el API (espera 400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/ventas/{{ID_VEN_crud}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_ES_VEN\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Venta completa",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{ID_VEN_crud}}/completa"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar = anular venta",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{ID_VEN_crud}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('ANULADA', () => pm.expect(pm.response.json().registro.ESTADO).to.eql('ANULADA'));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "DELETE es lógico: cambia el estado a ANULADA."
+    },
+    {
+      "name": "Desglose de venta (llave compuesta)",
+      "item": [
+        {
+          "name": "Preparar: reabastecer audífonos en tienda 2 (15 u.)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/catalogo-productos/2/6",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"EXISTENCIA_ACTUAL_CAT_PRO\": 15\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Preparar: crear venta (tienda 2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/ventas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_TI\": 2,\n  \"ID_EMP\": 3,\n  \"ID_CLI\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_VEN_des', pm.response.json().ID_VEN);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear línea (audífonos x2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/desglose-venta",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{ID_VEN_des}},\n  \"ID_PRO\": 6,\n  \"CANTIDAD_DES_VEN\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Subtotal = 2 x 659', () => pm.expect(pm.response.json().SUBTOTAL_DES_VEN).to.eql(1318));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Producto repetido en la venta (espera 409, PK)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/desglose-venta",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{ID_VEN_des}},\n  \"ID_PRO\": 6,\n  \"CANTIDAD_DES_VEN\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Producto fuera del catálogo de la tienda (espera 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/desglose-venta",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{ID_VEN_des}},\n  \"ID_PRO\": 2,\n  \"CANTIDAD_DES_VEN\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar desglose de la venta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/desglose-venta?ID_VEN={{ID_VEN_des}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener línea por llave compuesta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/desglose-venta/{{ID_VEN_des}}/6"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actualizar cantidad (trigger Update_Detalle)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/desglose-venta/{{ID_VEN_des}}/6",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"CANTIDAD_DES_VEN\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Existencia tras actualizar (15 - 5 = 10)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos/2/6"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Existencia = 10', () => pm.expect(pm.response.json().EXISTENCIA_ACTUAL_CAT_PRO).to.eql(10));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar línea (trigger Delete_Detalle)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/desglose-venta/{{ID_VEN_des}}/6"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Existencia devuelta (15)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/catalogo-productos/2/6"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Existencia = 15', () => pm.expect(pm.response.json().EXISTENCIA_ACTUAL_CAT_PRO).to.eql(15));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Limpiar: anular venta",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{ID_VEN_des}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Pagos",
+      "item": [
+        {
+          "name": "Preparar: reabastecer microondas en tienda 2 (10 u.)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/catalogo-productos/2/5",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"EXISTENCIA_ACTUAL_CAT_PRO\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Preparar: crear venta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/ventas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_TI\": 2,\n  \"ID_EMP\": 3,\n  \"ID_CLI\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_VEN_pag', pm.response.json().ID_VEN);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Preparar: agregar microondas (925)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/desglose-venta",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{ID_VEN_pag}},\n  \"ID_PRO\": 5,\n  \"CANTIDAD_DES_VEN\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Crear pago total (Q925) → PAGADA",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/pagos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ID_VEN\": {{ID_VEN_pag}},\n  \"MONTO_PAG\": 925,\n  \"ID_MET_PAG\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('ID_PAG_nuevo', pm.response.json().ID_PAG);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Listar pagos de la venta",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/pagos?ID_VEN={{ID_VEN_pag}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Obtener pago",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/pagos/{{ID_PAG_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Venta en PAGADA",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{ID_VEN_pag}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('PAGADA', () => pm.expect(pm.response.json().ESTADO).to.eql('PAGADA'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reducir monto (trigger Recalcular_Estado_Pago)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/pagos/{{ID_PAG_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"MONTO_PAG\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Venta vuelve a REGISTRADA",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{ID_VEN_pag}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('REGISTRADA', () => pm.expect(pm.response.json().ESTADO).to.eql('REGISTRADA'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Monto cero (espera 400, CHECK)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/pagos/{{ID_PAG_nuevo}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"MONTO_PAG\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar pago",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/pagos/{{ID_PAG_nuevo}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Limpiar: anular venta",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/ventas/{{ID_VEN_pag}}"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Reportes (Vistas)",
+      "item": [
+        {
+          "name": "Vista_Ventas_Ubicacion",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/reportes/ventas-ubicacion"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Columnas de la vista', () => pm.expect(pm.response.json()[0]).to.include.keys('TIENDA','MUNICIPIO','DEPARTAMENTO','PAIS','CANTIDAD_VENTAS','TOTAL_FACTURADO'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Vista_Top_Productos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/reportes/top-productos"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Columnas de la vista', () => pm.expect(pm.response.json()[0]).to.include.keys('CODIGO_PRODUCTO','PRODUCTO','CATEGORIA','MARCA','UNIDADES_VENDIDAS','MONTO_TOTAL'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Vista_Saldos_Pendientes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/reportes/saldos-pendientes"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Solo saldos > 0 o ventas sin pago', () => pm.response.json().forEach(r => pm.expect(r).to.include.keys('TOTAL_VENTA','MONTO_PAGADO','SALDO_PENDIENTE')));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Validaciones de errores",
+      "item": [
+        {
+          "name": "Registro inexistente (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/paises/99999"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Id inválido (400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/paises/abc"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ruta inexistente (404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/no-existe"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Nombre duplicado (409, UNIQUE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/paises",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_PA\": \"Guatemala\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Eliminar registro en uso (409, FK)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{baseUrl}}/api/paises/1"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Referencia inexistente (400, FK)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/departamentos",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_DEP\": \"X\",\n  \"ID_PA\": 99999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Campo obligatorio faltante (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/tiendas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"NOMBRE_TI\": \"Incompleta\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "JSON mal formado (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/paises",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"NOMBRE_PA\": ",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Body vacío en PUT (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/paises/1",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Demuestra que el API no se cae con datos incorrectos."
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "ID_CAR_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_CAT_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_CLI_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_DEP_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_EMP_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_ES_VEN_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_MAR_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_MET_PAG_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_MUN_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_PAG_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_PA_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_PER_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_PRO_cat",
+      "value": ""
+    },
+    {
+      "key": "ID_PRO_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_TIP_IDE_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_TIP_TIE_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_TI_nuevo",
+      "value": ""
+    },
+    {
+      "key": "ID_VEN_crud",
+      "value": ""
+    },
+    {
+      "key": "ID_VEN_des",
+      "value": ""
+    },
+    {
+      "key": "ID_VEN_pag",
+      "value": ""
+    },
+    {
+      "key": "cantidad_excedida",
+      "value": ""
+    },
+    {
+      "key": "existencia_antes_anular",
+      "value": ""
+    },
+    {
+      "key": "existencia_inicial",
+      "value": ""
+    },
+    {
+      "key": "id_venta_anular",
+      "value": ""
+    },
+    {
+      "key": "id_venta_prueba",
+      "value": ""
+    },
+    {
+      "key": "nit_prueba",
+      "value": ""
+    },
+    {
+      "key": "personas_antes",
+      "value": ""
+    }
+  ]
+}
